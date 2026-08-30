@@ -25,6 +25,9 @@ function elementLabel(element: Element) {
 export default function Index() {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const videoInputRef = useRef<HTMLInputElement>(null);
   const fileHandleRef = useRef<FileHandleLike | null>(null);
   const siteRef = useRef<HTMLElement | null>(null);
   const [source, setSource] = useState(starterHtml);
@@ -197,18 +200,51 @@ export default function Index() {
     const body = siteRef.current;
     if (!body) return;
     const doc = body.ownerDocument;
-    const element = type === "section" ? doc.createElement("section") : doc.createElement(type === "heading" ? "h2" : type === "text" ? "p" : "button");
-    element.textContent = type === "section" ? "New section — double-click to edit" : type === "heading" ? "New heading" : type === "text" ? "New text — double-click to edit" : "New button";
-    if (type === "section") element.style.padding = "40px";
-    if (type === "button") element.style.padding = "10px 18px";
+    if (type === "image") return imageInputRef.current?.click();
+    if (type === "video") return videoInputRef.current?.click();
+    if (type === "document") return documentInputRef.current?.click();
+    let element: HTMLElement;
+    if (type === "dropdown") {
+      element = doc.createElement("details");
+      element.innerHTML = "<summary>New dropdown</summary><p>Double-click this text to edit.</p>";
+    } else if (type === "divider") {
+      element = doc.createElement("hr");
+    } else {
+      element = type === "section" ? doc.createElement("section") : doc.createElement(type === "heading" ? "h2" : type === "text" ? "p" : "button");
+      element.textContent = type === "section" ? "New section — double-click to edit" : type === "heading" ? "New heading" : type === "text" ? "New text — double-click to edit" : "New button";
+      if (type === "section") element.style.padding = "40px";
+      if (type === "button") element.style.padding = "10px 18px";
+    }
     body.appendChild(element);
     setSelected(element as EditorElement);
     commit();
+  };
+
+  const addAsset = (file: File, type: "image" | "video" | "document") => {
+    const body = siteRef.current;
+    if (!body) return;
+    const url = URL.createObjectURL(file);
+    const doc = body.ownerDocument;
+    let element: HTMLElement;
+    if (type === "image") {
+      const image = doc.createElement("img"); image.src = url; image.alt = file.name; image.style.maxWidth = "100%"; element = image;
+    } else if (type === "video") {
+      const video = doc.createElement("video"); video.controls = true; video.src = url; video.style.maxWidth = "100%"; video.style.width = "100%"; element = video;
+    } else {
+      const wrapper = doc.createElement("div"); wrapper.className = "editor-document";
+      const link = doc.createElement("a"); link.href = url; link.download = file.name; link.target = "_blank"; link.textContent = `Open / download ${file.name}`; wrapper.appendChild(link); element = wrapper;
+    }
+    body.appendChild(element); setSelected(element as EditorElement); commit(); setStatus(`${type[0].toUpperCase() + type.slice(1)} added`);
+  };
+
+  const handleAssets = (event: React.ChangeEvent<HTMLInputElement>, type: "image" | "video" | "document") => {
+    Array.from(event.target.files || []).forEach((file) => addAsset(file, type));
+    event.target.value = "";
   };
 
   const fields = useMemo(() => [["Width", "width"], ["Height", "height"], ["Margin", "margin"], ["Padding", "padding"], ["Font size", "fontSize"], ["Color", "color"], ["Background", "backgroundColor"], ["Border radius", "borderRadius"]] as const, []);
 
   return <div className="editor-app">
     <header className="editor-topbar"><div className="editor-brand"><span>⚡</span> Visual Website Editor <small>{dirty ? "Unsaved changes" : ""}</small></div><button onClick={openFile}><FolderOpen size={15} /> Open HTML</button><button disabled={historyIndex === 0} onClick={() => restore(historyIndex - 1)} title="Undo"><Undo2 size={15} /></button><button disabled={historyIndex >= history.length - 1} onClick={() => restore(historyIndex + 1)} title="Redo"><Redo2 size={15} /></button><button className="primary" onClick={() => void save()}><Save size={15} /> Save file</button><span className="editor-status">{status}</span><div className="editor-spacer" /><div className="view-toggle"><button className={mode === "design" ? "active" : ""} onClick={() => setMode("design")}>Design</button><button className={mode === "preview" ? "active" : ""} onClick={() => { setMode("preview"); setSelected(null); }}>Preview</button></div><span className="file-name"><FileCode2 size={14} /> {fileName}</span></header>
-    <div className="editor-layout"><aside className="editor-panel left-panel"><h3>Add</h3><div className="add-grid">{[["section", "＋ Section"], ["heading", "＋ Heading"], ["text", "＋ Text"], ["button", "＋ Button"]].map(([type, label]) => <button key={type} onClick={() => addElement(type)}>{label}</button>)}</div><h3>Elements</h3><div className="element-tree">{elements.map((element, index) => <button className={selected === element ? "selected" : ""} key={`${element.tagName}-${index}`} onClick={() => setSelected(element)}>{elementLabel(element)}</button>)}</div><div className="asset-note"><strong>Persistent editing</strong><p>Open an HTML file, make changes, then use Save file. Chromium browsers write back to the original file; other browsers download an edited copy.</p><button onClick={() => void save()}><Download size={14} /> Export copy</button></div></aside><main className="editor-canvas"><div className="website-frame"><iframe ref={iframeRef} title="Website canvas" /></div></main><aside className="editor-panel right-panel"><div className="property-tabs"><button className={tab === "style" ? "active" : ""} onClick={() => setTab("style")}>Style</button><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content</button></div>{!selected ? <p className="empty-properties">Select an element to edit its properties.</p> : tab === "style" ? <div>{fields.map(([label, property]) => <label className="property-field" key={property}>{label}<input value={selected.style[property] || ""} onChange={(event) => updateStyle(property, event.target.value)} placeholder="inherit" /></label>)}<label className="property-field">ID<input value={selected.id} onChange={(event) => { selected.id = event.target.value; syncElements(); }} /></label><button className="delete-button" onClick={() => { selected.remove(); setSelected(null); commit(); }}><Trash2 size={14} /> Delete element</button></div> : <div>{!selected.children.length && <label className="property-field">Text<textarea value={selected.textContent || ""} onChange={(event) => { selected.textContent = event.target.value; commit(); }} /></label>}{selected.tagName === "IMG" && <><label className="property-field">Image source<input value={selected.getAttribute("src") || ""} onChange={(event) => { selected.setAttribute("src", event.target.value); commit(); }} /></label><label className="property-field">Alt text<input value={selected.getAttribute("alt") || ""} onChange={(event) => { selected.setAttribute("alt", event.target.value); commit(); }} /></label></>}</div>}</aside></div><input ref={inputRef} type="file" accept=".html,.htm,text/html" hidden onChange={(event) => void onFallbackFile(event.target.files?.[0])} /></div>;
+    <div className="editor-layout"><aside className="editor-panel left-panel"><h3>Add</h3><div className="add-grid">{[["section", "＋ Section"], ["heading", "＋ Heading"], ["text", "＋ Text"], ["button", "＋ Button"], ["dropdown", "＋ Dropdown"], ["image", "＋ Image"], ["video", "＋ Video"], ["document", "＋ Document"], ["divider", "＋ Divider"]].map(([type, label]) => <button key={type} onClick={() => addElement(type)}>{label}</button>)}</div><h3>Assets</h3><div className="asset-actions"><button onClick={() => imageInputRef.current?.click()}>Add Images</button><button onClick={() => documentInputRef.current?.click()}>Add Documents</button><button onClick={() => videoInputRef.current?.click()}>Add Videos</button></div><h3>Elements</h3><div className="element-tree">{elements.map((element, index) => <button className={selected === element ? "selected" : ""} key={`${element.tagName}-${index}`} onClick={() => setSelected(element)}>{elementLabel(element)}</button>)}</div><div className="asset-note"><strong>Persistent editing</strong><p>Open an HTML file, make changes, then use Save file. Chromium browsers write back to the original file; other browsers download an edited copy.</p><button onClick={() => void save()}><Download size={14} /> Export copy</button></div></aside><main className="editor-canvas"><div className="website-frame"><iframe ref={iframeRef} title="Website canvas" /></div></main><aside className="editor-panel right-panel"><div className="property-tabs"><button className={tab === "style" ? "active" : ""} onClick={() => setTab("style")}>Style</button><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content</button></div>{!selected ? <p className="empty-properties">Select an element to edit its properties.</p> : tab === "style" ? <div>{fields.map(([label, property]) => <label className="property-field" key={property}>{label}<input value={selected.style[property] || ""} onChange={(event) => updateStyle(property, event.target.value)} placeholder="inherit" /></label>)}<label className="property-field">ID<input value={selected.id} onChange={(event) => { selected.id = event.target.value; syncElements(); }} /></label><button className="delete-button" onClick={() => { selected.remove(); setSelected(null); commit(); }}><Trash2 size={14} /> Delete element</button></div> : <div>{!selected.children.length && <label className="property-field">Text<textarea value={selected.textContent || ""} onChange={(event) => { selected.textContent = event.target.value; commit(); }} /></label>}{selected.tagName === "IMG" && <><label className="property-field">Image source<input value={selected.getAttribute("src") || ""} onChange={(event) => { selected.setAttribute("src", event.target.value); commit(); }} /></label><label className="property-field">Alt text<input value={selected.getAttribute("alt") || ""} onChange={(event) => { selected.setAttribute("alt", event.target.value); commit(); }} /></label></>}</div>}</aside></div><input ref={inputRef} type="file" accept=".html,.htm,text/html" hidden onChange={(event) => void onFallbackFile(event.target.files?.[0])} /><input ref={imageInputRef} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(event) => handleAssets(event, "image")} /><input ref={documentInputRef} type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.rtf,.odt,.ods,.odp" multiple hidden onChange={(event) => handleAssets(event, "document")} /><input ref={videoInputRef} type="file" accept="video/*,.mp4,.webm,.ogg" multiple hidden onChange={(event) => handleAssets(event, "video")} /></div>;
 }

@@ -86,6 +86,7 @@ export default function Index() {
       setStatus("Finish editing before saving");
       return;
     }
+    window.clearTimeout(snapshotTimerRef.current);
     const html = serialize();
     if (!html) return;
     const baseName = fileName.replace(/\.html?$/i, "") || "website";
@@ -141,7 +142,14 @@ export default function Index() {
       observer.observe(doc.body, { subtree: true, childList: true, attributes: true, characterData: true });
       observerRef.current = observer;
       doc.body.addEventListener("click", (event) => {
-        if (modeRef.current !== "design") return;
+        if (modeRef.current !== "design") {
+          window.setTimeout(() => {
+            setDirty(true);
+            setStatus("Unsaved changes");
+            queueRecord();
+          }, 0);
+          return;
+        }
         const target = (event.target as Element).closest<ElementNode>("*");
         if (!target || target === doc.body || ["STYLE", "SCRIPT"].includes(target.tagName)) return;
         event.preventDefault();

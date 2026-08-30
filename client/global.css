@@ -119,3 +119,21 @@
     white-space: pre;
   }
 }
+
+.editor-app { --editor-bg: #171717; --editor-panel: #202020; --editor-line: #383838; --editor-muted: #999; --editor-text: #eee; min-height: 100vh; background: var(--editor-bg); color: var(--editor-text); font: 13px "Segoe UI", Arial, sans-serif; }
+.editor-app button, .editor-app input, .editor-app textarea { font: inherit; }
+.editor-app button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #474747; background: #2c2c2c; color: var(--editor-text); border-radius: 5px; padding: 6px 9px; cursor: pointer; }
+.editor-app button:hover { background: #383838; }
+.editor-app button:disabled { cursor: not-allowed; opacity: .4; }
+.editor-app .primary { background: #315d49; border-color: #477c64; }
+.editor-topbar { min-height: 54px; border-bottom: 1px solid var(--editor-line); background: #1e1e1e; display: flex; align-items: center; gap: 7px; padding: 0 12px; }
+.editor-brand { display: flex; align-items: center; gap: 7px; font-weight: 600; margin-right: 8px; white-space: nowrap; }
+.editor-brand > span { color: #ffc15a; font-size: 17px; }.editor-brand small { color: #e7a454; font-weight: 400; margin-left: 3px; }
+.editor-status, .file-name { color: var(--editor-muted); font-size: 11px; margin-left: 6px; }.file-name { display: flex; align-items: center; gap: 5px; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.editor-spacer { flex: 1; }
+.view-toggle { display: flex; }.view-toggle button { border-radius: 0; }.view-toggle button:first-child { border-radius: 5px 0 0 5px; }.view-toggle button:last-child { border-radius: 0 5px 5px 0; }.view-toggle .active, .property-tabs .active { background: #444; }
+.editor-layout { height: calc(100vh - 54px); display: grid; grid-template-columns: 235px minmax(0, 1fr) 290px; }.editor-panel { background: var(--editor-panel); overflow: auto; padding: 13px; }.left-panel { border-right: 1px solid var(--editor-line); }.right-panel { border-left: 1px solid var(--editor-line); }.editor-panel h3 { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--editor-muted); margin: 3px 0 9px; }.add-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; margin-bottom: 22px; }.add-grid button { white-space: nowrap; }
+.element-tree { margin: 0 -5px 22px; }.element-tree button { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 5px 7px; margin: 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }.element-tree button:hover { background: #303030; }.element-tree button.selected { background: #315d49; }
+.asset-note { border: 1px solid var(--editor-line); border-radius: 6px; padding: 10px; color: #aaa; line-height: 1.45; }.asset-note strong { color: #eee; }.asset-note p { margin: 6px 0 10px; font-size: 11px; }.asset-note button { width: 100%; }
+.editor-canvas { position: relative; overflow: auto; background: #4a4a4a; padding: 24px; display: flex; justify-content: center; }.website-frame { width: min(1200px, 100%); min-height: calc(100vh - 102px); background: white; box-shadow: 0 10px 35px #0008; }.website-frame iframe { display: block; width: 100%; height: calc(100vh - 102px); min-height: 650px; border: 0; background: white; }
+.property-tabs { display: flex; gap: 4px; margin-bottom: 13px; }.property-tabs button { flex: 1; }.empty-properties { color: var(--editor-muted); font-size: 11px; line-height: 1.45; }.property-field { display: block; color: #aaa; font-size: 10px; margin-bottom: 10px; }.property-field input, .property-field textarea { display: block; width: 100%; margin-top: 4px; background: #292929; border: 1px solid #444; color: #eee; border-radius: 4px; padding: 7px; }.property-field textarea { min-height: 90px; resize: vertical; }.delete-button { width: 100%; background: #4b2525 !important; border-color: #6d3b3b !important; margin-top: 5px; }
+@media (max-width: 900px) { .editor-layout { grid-template-columns: 195px minmax(0, 1fr); }.right-panel { display: none; }.editor-status { display: none; } }.ve-editor-body { outline: none !important; }

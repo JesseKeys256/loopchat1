@@ -42,6 +42,7 @@ export default function Index() {
   const [historyIndex, setHistoryIndex] = useState(0);
   const [editing, setEditing] = useState(false);
   const modeRef = useRef<"design" | "preview">("design");
+  const latestHtmlRef = useRef(starterHtml);
   const commitRef = useRef<(nextSource?: string) => void>(() => undefined);
 
   const syncElements = useCallback(() => {
@@ -57,6 +58,7 @@ export default function Index() {
     if (!body) return;
     const doc = body.ownerDocument;
     const next = nextSource ?? `<!doctype html>\n${doc.documentElement.outerHTML}`;
+    latestHtmlRef.current = next;
     setDirty(true);
     setStatus("Editing");
     setHistory((previous) => [...previous.slice(0, historyIndex + 1), next].slice(-80));
@@ -69,6 +71,7 @@ export default function Index() {
   const loadHtml = useCallback((html: string, name?: string, handle?: FileHandleLike) => {
     fileHandleRef.current = handle ?? null;
     setFileName(name || "Untitled page");
+    latestHtmlRef.current = html;
     setSource(html);
     setHistory([html]);
     setHistoryIndex(0);
@@ -101,10 +104,12 @@ export default function Index() {
 
   const exportHtml = useCallback(() => {
     const body = siteRef.current;
-    if (!body) return "";
-    const doc = body.ownerDocument;
-    doc.body.classList.remove("ve-editor-body");
-    return `<!doctype html>\n${doc.documentElement.outerHTML}`;
+    if (!body) return latestHtmlRef.current;
+    const documentElement = body.ownerDocument.documentElement.cloneNode(true) as HTMLElement;
+    documentElement.querySelector("body")?.classList.remove("ve-editor-body");
+    const html = `<!doctype html>\n${documentElement.outerHTML}`;
+    latestHtmlRef.current = html;
+    return html;
   }, []);
 
   const save = async () => {
@@ -135,6 +140,7 @@ export default function Index() {
 
   const restore = (index: number) => {
     if (index < 0 || index >= history.length) return;
+    latestHtmlRef.current = history[index];
     setSource(history[index]);
     setHistoryIndex(index);
     setSelected(null);

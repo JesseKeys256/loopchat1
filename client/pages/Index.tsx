@@ -118,7 +118,18 @@ export default function Index() {
   const save = async () => {
     if (editing) return setStatus("Finish editing first");
     const html = exportHtml();
-    const handle = fileHandleRef.current;
+    let handle = fileHandleRef.current;
+    if (!handle) {
+      const savePicker = (window as Window & { showSaveFilePicker?: (options?: object) => Promise<FileHandleLike> }).showSaveFilePicker;
+      if (savePicker) {
+        try {
+          handle = await savePicker({ suggestedName: fileName === "Untitled page" ? "edited-page.html" : fileName, types: [{ description: "HTML files", accept: { "text/html": [".html"] } }] });
+          fileHandleRef.current = handle;
+        } catch (error) {
+          if ((error as Error).name === "AbortError") return;
+        }
+      }
+    }
     if (handle?.createWritable) {
       try {
         const writable = await handle.createWritable();

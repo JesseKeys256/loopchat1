@@ -82,7 +82,9 @@ export default function Index() {
         const file = await (handle as FileHandleLike & { getFile: () => Promise<File> }).getFile();
         loadHtml(await file.text(), handle.name, handle);
       } catch (error) {
-        if ((error as Error).name !== "AbortError") setStatus("Could not open file");
+        if ((error as Error).name === "AbortError") return;
+        setStatus("Opening file picker…");
+        inputRef.current?.click();
       }
       return;
     }

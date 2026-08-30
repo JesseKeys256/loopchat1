@@ -41,6 +41,7 @@ export default function Index() {
   const [history, setHistory] = useState<string[]>([starterHtml]);
   const [historyIndex, setHistoryIndex] = useState(0);
   const [editing, setEditing] = useState(false);
+  const modeRef = useRef<"design" | "preview">("design");
   const commitRef = useRef<(nextSource?: string) => void>(() => undefined);
 
   const syncElements = useCallback(() => {
@@ -48,6 +49,8 @@ export default function Index() {
     if (!body) return;
     setElements(Array.from(body.querySelectorAll<EditorElement>("*:not(style):not(script)")));
   }, []);
+
+  modeRef.current = mode;
 
   const commit = useCallback((nextSource?: string) => {
     const body = siteRef.current;
@@ -150,7 +153,7 @@ export default function Index() {
       body.classList.add("ve-editor-body");
       syncElements();
       body.addEventListener("click", (event) => {
-        if (mode !== "design") return;
+        if (modeRef.current !== "design") return;
         const target = (event.target as Element).closest<EditorElement>("*");
         if (!target || target === body || target.tagName === "STYLE" || target.tagName === "SCRIPT") return;
         event.preventDefault();
@@ -159,7 +162,7 @@ export default function Index() {
         setTab("style");
       }, true);
       body.addEventListener("dblclick", (event) => {
-        if (mode !== "design") return;
+        if (modeRef.current !== "design") return;
         const target = (event.target as Element).closest<EditorElement>("*");
         if (!target || target.children.length || ["IMG", "VIDEO", "INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) return;
         event.preventDefault();
@@ -179,7 +182,7 @@ export default function Index() {
     frame.addEventListener("load", onLoad);
     frame.srcdoc = source;
     return () => frame.removeEventListener("load", onLoad);
-  }, [source, mode, syncElements]);
+  }, [source, syncElements]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

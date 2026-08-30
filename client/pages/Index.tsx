@@ -1,278 +1,221 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, FileCode2, FolderOpen, Redo2, Save, Trash2, Undo2 } from "lucide-react";
 
-type FileHandleLike = {
-  name: string;
-  createWritable?: () => Promise<{ write: (data: string) => Promise<void>; close: () => Promise<void> }>;
+type ElementNode = HTMLElement;
+
+const starter = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>New website</title><style>body{font-family:Arial,sans-serif;margin:0;color:#17251e}main{max-width:900px;margin:auto;padding:80px 32px}h1{font-size:48px;margin:0 0 16px}p{font-size:18px;line-height:1.6;color:#526159}.cta{display:inline-block;background:#2e7658;color:#fff;padding:12px 20px;border-radius:7px}</style></head><body><main><h1>Build something great</h1><p>Open an HTML file to start editing, or use this starter page.</p><a class="cta" href="#">Get started</a></main></body></html>`;
+
+const kebab = (value: string) => value.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`);
+const labelFor = (element: Element) => {
+  const text = (element.textContent || element.getAttribute("alt") || "").replace(/\s+/g, " ").trim();
+  return `<${element.tagName.toLowerCase()}>${text ? ` ${text.slice(0, 28)}${text.length > 28 ? "…" : ""}` : ""}`;
 };
 
-type EditorElement = HTMLElement & { contentEditable: string };
-
-const starterHtml = `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>My website</title><style>body{font-family:Arial,sans-serif;margin:0;color:#17251e}main{max-width:900px;margin:auto;padding:80px 32px}h1{font-size:48px;margin:0 0 16px}p{font-size:18px;line-height:1.6;color:#526159}.cta{display:inline-block;background:#2e7658;color:white;padding:12px 20px;border-radius:7px}</style></head><body><main><h1>Build something great</h1><p>Open an HTML file or edit this starter page. Double-click text to change it.</p><a class="cta" href="#">Get started</a></main></body></html>`;
-
-function htmlDocument(value: string) {
-  const parsed = new DOMParser().parseFromString(value, "text/html");
-  if (!parsed.body) parsed.appendChild(parsed.createElement("body"));
-  return parsed;
-}
-
-function elementLabel(element: Element) {
-  const text = (element.textContent || element.getAttribute("alt") || "").trim().replace(/\s+/g, " ");
-  return `<${element.tagName.toLowerCase()}>${text ? ` ${text.slice(0, 24)}${text.length > 24 ? "…" : ""}` : ""}`;
-}
-
 export default function Index() {
-  const iframeRef = useRef<HTMLIFrameElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const htmlInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
-  const documentInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
-  const fileHandleRef = useRef<FileHandleLike | null>(null);
-  const siteRef = useRef<HTMLElement | null>(null);
-  const [source, setSource] = useState(starterHtml);
-  const [fileName, setFileName] = useState("Untitled page");
-  const [selected, setSelected] = useState<EditorElement | null>(null);
-  const [elements, setElements] = useState<EditorElement[]>([]);
-  const [mode, setMode] = useState<"design" | "preview">("design");
+  const documentInputRef = useRef<HTMLInputElement>(null);
+  const documentRef = useRef<Document | null>(null);
+  const observerRef = useRef<MutationObserver | null>(null);
+  const historyRef = useRef<string[]>([starter]);
+  const historyIndexRef = useRef(0);
+  const snapshotTimerRef = useRef<number | undefined>(undefined);
+  const [source, setSource] = useState(starter);
+  const [fileName, setFileName] = useState("new-website.html");
+  const [selected, setSelected] = useState<ElementNode | null>(null);
+  const [nodes, setNodes] = useState<ElementNode[]>([]);
   const [tab, setTab] = useState<"style" | "content">("style");
+  const [mode, setMode] = useState<"design" | "preview">("design");
   const [dirty, setDirty] = useState(false);
   const [status, setStatus] = useState("Ready");
-  const [history, setHistory] = useState<string[]>([starterHtml]);
-  const [historyIndex, setHistoryIndex] = useState(0);
-  const [editing, setEditing] = useState(false);
-  const modeRef = useRef<"design" | "preview">("design");
-  const latestHtmlRef = useRef(starterHtml);
-  const commitRef = useRef<(nextSource?: string) => void>(() => undefined);
-
-  const syncElements = useCallback(() => {
-    const body = siteRef.current;
-    if (!body) return;
-    setElements(Array.from(body.querySelectorAll<EditorElement>("*:not(style):not(script)")));
-  }, []);
-
+  const [historyVersion, setHistoryVersion] = useState(0);
+  const modeRef = useRef(mode);
   modeRef.current = mode;
 
-  const serializeDocument = useCallback(() => {
-    const body = siteRef.current;
-    if (!body) return latestHtmlRef.current;
-    const documentElement = body.ownerDocument.documentElement.cloneNode(true) as HTMLElement;
-    documentElement.querySelector("body")?.classList.remove("ve-editor-body");
-    return `<!doctype html>\n${documentElement.outerHTML}`;
+  const serialize = useCallback(() => {
+    const doc = documentRef.current;
+    if (!doc?.documentElement) return source;
+    const root = doc.documentElement.cloneNode(true) as HTMLElement;
+    root.querySelector("body")?.classList.remove("visual-editor-document");
+    return `<!doctype html>\n${root.outerHTML}`;
+  }, [source]);
+
+  const refreshNodes = useCallback(() => {
+    const body = documentRef.current?.body;
+    if (!body) return;
+    setNodes(Array.from(body.querySelectorAll<ElementNode>("*:not(style):not(script)")));
   }, []);
 
-  const commit = useCallback((nextSource?: string) => {
-    const body = siteRef.current;
-    if (!body) return;
-    const next = nextSource ?? serializeDocument();
-    latestHtmlRef.current = next;
+  const record = useCallback(() => {
+    const html = serialize();
+    const history = historyRef.current.slice(0, historyIndexRef.current + 1);
+    if (history[history.length - 1] === html) return;
+    history.push(html);
+    historyRef.current = history.slice(-60);
+    historyIndexRef.current = historyRef.current.length - 1;
+    setHistoryVersion((value) => value + 1);
     setDirty(true);
-    setStatus("Editing");
-    setHistory((previous) => [...previous.slice(0, historyIndex + 1), next].slice(-80));
-    setHistoryIndex((index) => Math.min(index + 1, 79));
-    syncElements();
-  }, [historyIndex, serializeDocument, syncElements]);
+    setStatus("Unsaved changes");
+    refreshNodes();
+  }, [refreshNodes, serialize]);
 
-  commitRef.current = commit;
+  const queueRecord = useCallback(() => {
+    window.clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = window.setTimeout(record, 300);
+  }, [record]);
 
-  const loadHtml = useCallback((html: string, name?: string, handle?: FileHandleLike) => {
-    fileHandleRef.current = handle ?? null;
-    setFileName(name || "Untitled page");
-    latestHtmlRef.current = html;
+  const load = useCallback((html: string, name: string) => {
+    observerRef.current?.disconnect();
+    documentRef.current = null;
+    historyRef.current = [html];
+    historyIndexRef.current = 0;
     setSource(html);
-    setHistory([html]);
-    setHistoryIndex(0);
+    setFileName(name);
     setSelected(null);
     setDirty(false);
-    setStatus("Ready");
+    setStatus("Loaded");
+    setHistoryVersion((value) => value + 1);
   }, []);
 
-  const openFile = async () => {
-    const picker = (window as Window & { showOpenFilePicker?: (options?: object) => Promise<FileHandleLike[]> }).showOpenFilePicker;
-    if (picker) {
-      try {
-        const [handle] = await picker({ types: [{ description: "HTML files", accept: { "text/html": [".html", ".htm"] } }] });
-        const file = await (handle as FileHandleLike & { getFile: () => Promise<File> }).getFile();
-        loadHtml(await file.text(), handle.name, handle);
-      } catch (error) {
-        if ((error as Error).name === "AbortError") return;
-        setStatus("Opening file picker…");
-        inputRef.current?.click();
-      }
+  const openHtml = () => htmlInputRef.current?.click();
+
+  const saveCopy = useCallback(() => {
+    if (selected?.isContentEditable) {
+      setStatus("Finish editing before saving");
       return;
     }
-    inputRef.current?.click();
-  };
-
-  const onFallbackFile = async (file?: File) => {
-    if (file) loadHtml(await file.text(), file.name);
-    if (inputRef.current) inputRef.current.value = "";
-  };
-
-  const exportHtml = useCallback(() => {
-    const html = serializeDocument();
-    latestHtmlRef.current = html;
-    return html;
-  }, [serializeDocument]);
-
-  const save = async () => {
-    if (editing) return setStatus("Finish editing first");
-    const html = exportHtml();
-    const savePicker = (window as Window & { showSaveFilePicker?: (options?: object) => Promise<FileHandleLike> }).showSaveFilePicker;
-    if (savePicker) {
-      try {
-        const handle = await savePicker({ suggestedName: fileName === "Untitled page" ? "edited-website.html" : fileName.replace(/\.html?$/i, "-edited.html"), types: [{ description: "HTML files", accept: { "text/html": [".html"] } }] });
-        if (handle.createWritable) {
-          const writable = await handle.createWritable();
-          await writable.write(html);
-          await writable.close();
-          setDirty(false);
-          setStatus("Saved new website copy");
-          return;
-        }
-      } catch (error) {
-        if ((error as Error).name === "AbortError") return;
-      }
-    }
+    const html = serialize();
+    if (!html) return;
+    const baseName = fileName.replace(/\.html?$/i, "") || "website";
     const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-    const link = document.createElement("a");
-    link.href = URL.createObjectURL(blob);
-    link.download = fileName === "Untitled page" ? "edited-website.html" : fileName.replace(/\.html?$/i, "-edited.html");
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${baseName}-edited.html`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDirty(false);
-    setStatus("Downloaded new website copy");
+    setStatus(`Saved ${anchor.download}`);
+  }, [fileName, selected, serialize]);
+
+  const undo = () => {
+    if (historyIndexRef.current <= 0) return;
+    historyIndexRef.current -= 1;
+    setSource(historyRef.current[historyIndexRef.current]);
+    setSelected(null);
+    setDirty(historyIndexRef.current > 0);
+    setStatus("Undo");
+    setHistoryVersion((value) => value + 1);
   };
 
-  const restore = (index: number) => {
-    if (index < 0 || index >= history.length) return;
-    latestHtmlRef.current = history[index];
-    setSource(history[index]);
-    setHistoryIndex(index);
+  const redo = () => {
+    if (historyIndexRef.current >= historyRef.current.length - 1) return;
+    historyIndexRef.current += 1;
+    setSource(historyRef.current[historyIndexRef.current]);
     setSelected(null);
-    setDirty(index !== 0);
-    setStatus(index === 0 ? "Ready" : "Restored");
+    setDirty(true);
+    setStatus("Redo");
+    setHistoryVersion((value) => value + 1);
   };
 
   useEffect(() => {
-    const frame = iframeRef.current;
+    const frame = frameRef.current;
     if (!frame) return;
     const onLoad = () => {
       const doc = frame.contentDocument;
       if (!doc?.body) return;
-      const body = doc.body;
-      siteRef.current = body;
-      body.classList.add("ve-editor-body");
-      latestHtmlRef.current = `<!doctype html>\n${doc.documentElement.outerHTML}`;
+      observerRef.current?.disconnect();
+      documentRef.current = doc;
+      doc.body.classList.add("visual-editor-document");
+      refreshNodes();
       const observer = new MutationObserver(() => {
-        latestHtmlRef.current = serializeDocument();
         setDirty(true);
+        setStatus("Unsaved changes");
+        refreshNodes();
+        queueRecord();
       });
-      observer.observe(body, { attributes: true, childList: true, characterData: true, subtree: true });
-      syncElements();
-      body.addEventListener("click", (event) => {
+      observer.observe(doc.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      observerRef.current = observer;
+      doc.body.addEventListener("click", (event) => {
         if (modeRef.current !== "design") return;
-        const target = (event.target as Element).closest<EditorElement>("*");
-        if (!target || target === body || target.tagName === "STYLE" || target.tagName === "SCRIPT") return;
+        const target = (event.target as Element).closest<ElementNode>("*");
+        if (!target || target === doc.body || ["STYLE", "SCRIPT"].includes(target.tagName)) return;
         event.preventDefault();
         event.stopPropagation();
         setSelected(target);
         setTab("style");
       }, true);
-      body.addEventListener("dblclick", (event) => {
+      doc.body.addEventListener("dblclick", (event) => {
         if (modeRef.current !== "design") return;
-        const target = (event.target as Element).closest<EditorElement>("*");
+        const target = (event.target as Element).closest<ElementNode>("*");
         if (!target || target.children.length || ["IMG", "VIDEO", "INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) return;
         event.preventDefault();
         event.stopPropagation();
         target.contentEditable = "true";
         target.focus();
-        setEditing(true);
+        setSelected(target);
         const finish = () => {
           target.contentEditable = "false";
           target.removeEventListener("blur", finish);
-          setEditing(false);
-          commitRef.current();
+          record();
         };
         target.addEventListener("blur", finish);
       }, true);
     };
     frame.addEventListener("load", onLoad);
     frame.srcdoc = source;
-    return () => frame.removeEventListener("load", onLoad);
-  }, [source, serializeDocument, syncElements]);
+    return () => {
+      frame.removeEventListener("load", onLoad);
+      observerRef.current?.disconnect();
+    };
+  }, [refreshNodes, record, queueRecord, source]);
 
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    const keydown = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey)) return;
-      if (event.key.toLowerCase() === "s") { event.preventDefault(); void save(); }
-      if (event.key.toLowerCase() === "z") { event.preventDefault(); restore(event.shiftKey ? historyIndex + 1 : historyIndex - 1); }
-      if (event.key.toLowerCase() === "y") { event.preventDefault(); restore(historyIndex + 1); }
+      if (event.key.toLowerCase() === "s") { event.preventDefault(); saveCopy(); }
+      if (event.key.toLowerCase() === "z") { event.preventDefault(); event.shiftKey ? redo() : undo(); }
+      if (event.key.toLowerCase() === "y") { event.preventDefault(); redo(); }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", keydown);
+    return () => window.removeEventListener("keydown", keydown);
   });
 
-  const updateStyle = (property: string, value: string) => {
-    if (!selected) return;
-    selected.style.setProperty(property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`), value);
-    commit();
-  };
-
-  const addElement = (type: string) => {
-    const body = siteRef.current;
+  const update = (fn: () => void) => { fn(); setDirty(true); setStatus("Unsaved changes"); queueRecord(); };
+  const add = (type: string) => {
+    const body = documentRef.current?.body;
     if (!body) return;
-    const doc = body.ownerDocument;
     if (type === "image") return imageInputRef.current?.click();
     if (type === "video") return videoInputRef.current?.click();
     if (type === "document") return documentInputRef.current?.click();
-    let element: HTMLElement;
-    if (type === "dropdown") {
-      element = doc.createElement("details");
-      element.innerHTML = "<summary>New dropdown</summary><p>Double-click this text to edit.</p>";
-    } else if (type === "divider") {
-      element = doc.createElement("hr");
-    } else {
-      element = type === "section" ? doc.createElement("section") : doc.createElement(type === "heading" ? "h2" : type === "text" ? "p" : "button");
-      element.textContent = type === "section" ? "New section — double-click to edit" : type === "heading" ? "New heading" : type === "text" ? "New text — double-click to edit" : "New button";
-      if (type === "section") element.style.padding = "40px";
-      if (type === "button") element.style.padding = "10px 18px";
-    }
+    const doc = body.ownerDocument;
+    const element = type === "section" ? doc.createElement("section") : type === "heading" ? doc.createElement("h2") : type === "text" ? doc.createElement("p") : type === "button" ? doc.createElement("button") : type === "dropdown" ? doc.createElement("details") : doc.createElement("hr");
+    if (type === "dropdown") element.innerHTML = "<summary>New dropdown</summary><p>Double-click to edit this content.</p>";
+    else if (type === "divider") { /* empty divider */ }
+    else element.textContent = type === "section" ? "New section — double-click to edit" : type === "heading" ? "New heading" : type === "text" ? "New text — double-click to edit" : "New button";
+    if (type === "section") element.style.padding = "40px";
+    if (type === "button") element.style.padding = "10px 18px";
     body.appendChild(element);
-    setSelected(element as EditorElement);
-    commit();
+    setSelected(element);
+    record();
   };
 
   const addAsset = async (file: File, type: "image" | "video" | "document") => {
-    const body = siteRef.current;
+    const body = documentRef.current?.body;
     if (!body) return;
-    const url = await new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
+    const data = await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = () => reject(reader.error); reader.readAsDataURL(file); });
     const doc = body.ownerDocument;
     let element: HTMLElement;
-    if (type === "image") {
-      const image = doc.createElement("img"); image.src = url; image.alt = file.name; image.style.maxWidth = "100%"; element = image;
-    } else if (type === "video") {
-      const video = doc.createElement("video"); video.controls = true; video.src = url; video.style.maxWidth = "100%"; video.style.width = "100%"; element = video;
-    } else {
-      const wrapper = doc.createElement("div"); wrapper.className = "editor-document";
-      const link = doc.createElement("a"); link.href = url; link.download = file.name; link.target = "_blank"; link.textContent = `Open / download ${file.name}`; wrapper.appendChild(link); element = wrapper;
-    }
-    body.appendChild(element); setSelected(element as EditorElement); commit(); setStatus(`${type[0].toUpperCase() + type.slice(1)} added`);
+    if (type === "image") { const image = doc.createElement("img"); image.src = data; image.alt = file.name; image.style.maxWidth = "100%"; element = image; }
+    else if (type === "video") { const video = doc.createElement("video"); video.src = data; video.controls = true; video.style.maxWidth = "100%"; video.style.width = "100%"; element = video; }
+    else { const wrapper = doc.createElement("div"); const link = doc.createElement("a"); link.href = data; link.download = file.name; link.textContent = `Open / download ${file.name}`; wrapper.appendChild(link); element = wrapper; }
+    body.appendChild(element); setSelected(element); record(); setStatus(`${type} added — unsaved`);
   };
 
-  const handleAssets = (event: React.ChangeEvent<HTMLInputElement>, type: "image" | "video" | "document") => {
-    Array.from(event.target.files || []).forEach((file) => void addAsset(file, type));
-    event.target.value = "";
-  };
-
-  const fields = useMemo(() => [["Width", "width"], ["Height", "height"], ["Margin", "margin"], ["Padding", "padding"], ["Font size", "fontSize"], ["Color", "color"], ["Background", "backgroundColor"], ["Border radius", "borderRadius"]] as const, []);
-
-  return <div className="editor-app">
-    <header className="editor-topbar"><div className="editor-brand"><span>⚡</span> Visual Website Editor <small>{dirty ? "Unsaved changes" : ""}</small></div><button onClick={openFile}><FolderOpen size={15} /> Open HTML</button><button disabled={historyIndex === 0} onClick={() => restore(historyIndex - 1)} title="Undo"><Undo2 size={15} /></button><button disabled={historyIndex >= history.length - 1} onClick={() => restore(historyIndex + 1)} title="Redo"><Redo2 size={15} /></button><button className="primary" onClick={() => void save()}><Save size={15} /> Save file</button><span className="editor-status">{status}</span><div className="editor-spacer" /><div className="view-toggle"><button className={mode === "design" ? "active" : ""} onClick={() => setMode("design")}>Design</button><button className={mode === "preview" ? "active" : ""} onClick={() => { setMode("preview"); setSelected(null); }}>Preview</button></div><span className="file-name"><FileCode2 size={14} /> {fileName}</span></header>
-    <div className="editor-layout"><aside className="editor-panel left-panel"><h3>Add</h3><div className="add-grid">{[["section", "＋ Section"], ["heading", "＋ Heading"], ["text", "＋ Text"], ["button", "＋ Button"], ["dropdown", "＋ Dropdown"], ["image", "＋ Image"], ["video", "＋ Video"], ["document", "＋ Document"], ["divider", "＋ Divider"]].map(([type, label]) => <button key={type} onClick={() => addElement(type)}>{label}</button>)}</div><h3>Assets</h3><div className="asset-actions"><button onClick={() => imageInputRef.current?.click()}>Add Images</button><button onClick={() => documentInputRef.current?.click()}>Add Documents</button><button onClick={() => videoInputRef.current?.click()}>Add Videos</button></div><h3>Elements</h3><div className="element-tree">{elements.map((element, index) => <button className={selected === element ? "selected" : ""} key={`${element.tagName}-${index}`} onClick={() => setSelected(element)}>{elementLabel(element)}</button>)}</div><div className="asset-note"><strong>Persistent editing</strong><p>Open an HTML file, make changes, then use Save file to create a complete new website copy.</p><button onClick={() => void save()}><Download size={14} /> Export copy</button></div></aside><main className="editor-canvas"><div className="website-frame"><iframe ref={iframeRef} title="Website canvas" /></div></main><aside className="editor-panel right-panel"><div className="property-tabs"><button className={tab === "style" ? "active" : ""} onClick={() => setTab("style")}>Style</button><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content</button></div>{!selected ? <p className="empty-properties">Select an element to edit its properties.</p> : tab === "style" ? <div>{fields.map(([label, property]) => <label className="property-field" key={property}>{label}<input value={selected.style[property] || ""} onChange={(event) => updateStyle(property, event.target.value)} placeholder="inherit" /></label>)}<label className="property-field">ID<input value={selected.id} onChange={(event) => { selected.id = event.target.value; syncElements(); }} /></label><label className="property-field">Classes<input value={typeof selected.className === "string" ? selected.className : ""} onChange={(event) => { selected.className = event.target.value; syncElements(); commit(); }} /></label><button className="delete-button" onClick={() => { selected.remove(); setSelected(null); commit(); }}><Trash2 size={14} /> Delete element</button></div> : <div>{!selected.children.length && <label className="property-field">Text<textarea value={selected.textContent || ""} onChange={(event) => { selected.textContent = event.target.value; commit(); }} /></label>}{selected.tagName === "IMG" && <><label className="property-field">Image source<input value={selected.getAttribute("src") || ""} onChange={(event) => { selected.setAttribute("src", event.target.value); commit(); }} /></label><label className="property-field">Alt text<input value={selected.getAttribute("alt") || ""} onChange={(event) => { selected.setAttribute("alt", event.target.value); commit(); }} /></label></>}</div>}</aside></div><input ref={inputRef} type="file" accept=".html,.htm,text/html" hidden onChange={(event) => void onFallbackFile(event.target.files?.[0])} /><input ref={imageInputRef} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(event) => handleAssets(event, "image")} /><input ref={documentInputRef} type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.rtf,.odt,.ods,.odp" multiple hidden onChange={(event) => handleAssets(event, "document")} /><input ref={videoInputRef} type="file" accept="video/*,.mp4,.webm,.ogg" multiple hidden onChange={(event) => handleAssets(event, "video")} /></div>;
+  const styles: [string, string][] = [["Width", "width"], ["Height", "height"], ["Margin", "margin"], ["Padding", "padding"], ["Font size", "fontSize"], ["Color", "color"], ["Background", "backgroundColor"], ["Border radius", "borderRadius"]];
+  return <div className="editor-app"><header className="editor-topbar"><div className="editor-brand"><span>⚡</span> Visual Website Editor {dirty && <small>Unsaved</small>}</div><button onClick={openHtml}><FolderOpen size={15} /> Open HTML</button><button onClick={undo} disabled={historyIndexRef.current === 0}><Undo2 size={15} /></button><button onClick={redo} disabled={historyIndexRef.current >= historyRef.current.length - 1}><Redo2 size={15} /></button><button className="primary" onClick={saveCopy}><Save size={15} /> Save new copy</button><span className="editor-status">{status}</span><div className="editor-spacer" /><div className="view-toggle"><button className={mode === "design" ? "active" : ""} onClick={() => setMode("design")}>Design</button><button className={mode === "preview" ? "active" : ""} onClick={() => { setMode("preview"); setSelected(null); }}>Preview</button></div><span className="file-name"><FileCode2 size={14} /> {fileName}</span></header><div className="editor-layout"><aside className="editor-panel left-panel"><h3>Add</h3><div className="add-grid">{[["section", "＋ Section"], ["heading", "＋ Heading"], ["text", "＋ Text"], ["button", "＋ Button"], ["dropdown", "＋ Dropdown"], ["image", "＋ Image"], ["video", "＋ Video"], ["document", "＋ Document"], ["divider", "＋ Divider"]].map(([type, text]) => <button key={type} onClick={() => add(type)}>{text}</button>)}</div><h3>Assets</h3><div className="asset-actions"><button onClick={() => imageInputRef.current?.click()}>Add Images</button><button onClick={() => documentInputRef.current?.click()}>Add Documents</button><button onClick={() => videoInputRef.current?.click()}>Add Videos</button></div><h3>Elements</h3><div className="element-tree">{nodes.map((node, index) => <button className={selected === node ? "selected" : ""} key={`${node.tagName}-${index}`} onClick={() => setSelected(node)}>{labelFor(node)}</button>)}</div><div className="save-note"><strong>Save a complete copy</strong><p>Every current edit and added asset is embedded into the new HTML file.</p><button onClick={saveCopy}><Download size={14} /> Export copy</button></div></aside><main className="editor-canvas"><div className="website-frame"><iframe ref={frameRef} title="Website canvas" /></div></main><aside className="editor-panel right-panel"><div className="property-tabs"><button className={tab === "style" ? "active" : ""} onClick={() => setTab("style")}>Style</button><button className={tab === "content" ? "active" : ""} onClick={() => setTab("content")}>Content</button></div>{!selected ? <p className="empty-properties">Select an element to edit its properties.</p> : tab === "style" ? <div>{styles.map(([name, property]) => <label className="property-field" key={property}>{name}<input value={selected.style[property as keyof CSSStyleDeclaration] as string || ""} onChange={(event) => update(() => selected.style.setProperty(kebab(property), event.target.value))} /></label>)}<label className="property-field">ID<input value={selected.id} onChange={(event) => update(() => { selected.id = event.target.value; })} /></label><label className="property-field">Classes<input value={selected.className} onChange={(event) => update(() => { selected.className = event.target.value; })} /></label><button className="delete-button" onClick={() => { selected.remove(); setSelected(null); record(); }}><Trash2 size={14} /> Delete element</button></div> : <div>{!selected.children.length && <label className="property-field">Text<textarea value={selected.textContent || ""} onChange={(event) => update(() => { selected.textContent = event.target.value; })} /></label>}{selected.tagName === "A" && <label className="property-field">Link URL<input value={selected.getAttribute("href") || ""} onChange={(event) => update(() => selected.setAttribute("href", event.target.value))} /></label>}{selected.tagName === "IMG" && <label className="property-field">Alt text<input value={(selected as HTMLImageElement).alt} onChange={(event) => update(() => { (selected as HTMLImageElement).alt = event.target.value; })} /></label>}</div>}</aside></div><input ref={htmlInputRef} type="file" accept=".html,.htm,text/html" hidden onChange={async (event) => { const file = event.target.files?.[0]; if (file) load(await file.text(), file.name); event.target.value = ""; }} /><input ref={imageInputRef} type="file" accept="image/*" multiple hidden onChange={(event) => { Array.from(event.target.files || []).forEach((file) => void addAsset(file, "image")); event.target.value = ""; }} /><input ref={videoInputRef} type="file" accept="video/*" multiple hidden onChange={(event) => { Array.from(event.target.files || []).forEach((file) => void addAsset(file, "video")); event.target.value = ""; }} /><input ref={documentInputRef} type="file" accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.rtf,.odt,.ods,.odp" multiple hidden onChange={(event) => { Array.from(event.target.files || []).forEach((file) => void addAsset(file, "document")); event.target.value = ""; }} /></div>;
 }
